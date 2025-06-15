@@ -521,6 +521,284 @@ class JadwalTanamManager:
             self.db.connection.rollback()
             return False
 
+class Jadwal_Pemupukan:
+    def __init__(self, conn, cur):
+        self.conn = conn
+        self.cur = cur
+
+    def lihat_JadwalPemupukan(self):
+        print("1: Lihat Jadwal Pemupukan")
+        try:
+            query = """
+            SELECT 
+                jp.id_kegiatan,
+                t.id_tanaman || ' / ' || t.nama_tanaman AS tanaman,
+                jp.nama_kegiatan,
+                pp.jenis,
+                jp.dosis_per_bibit_tanaman AS dosis_per_bibit,
+                jp.tanggal_pemupukan AS waktu_pemupukan
+            FROM Jadwal_Pemupukan jp
+            JOIN Tanaman t ON jp.id_tanaman = t.id_tanaman
+            JOIN Pupuk_Pestisida pp ON jp.id_kegiatan = pp.id_kegiatan
+            ORDER BY jp.id_kegiatan;
+            """
+            self.cur.execute(query)
+            results = self.cur.fetchall()
+            
+            if results:
+                print("\nJADWAL PEMUPUKAN")
+                print("=" * 80)
+                columns = ["ID Kegiatan", "ID/Nama Tanaman", "Nama Kegiatan", "Jenis", "Waktu Pemupukan", "Dosis per Bibit"]
+                print(tabulate([list(row) for row in results], headers=columns, tablefmt="grid"))
+            else:
+                print("Tidak ada jadwal pemupukan yang ditemukan")
+        except psycopg2.Error as e:
+            print(f"Error mengambil jadwal pemupukan: {e}")
+
+    def tambah_JadwalPemupukan(self):
+        print("2: Tambah Jadwal Pemupukan")
+        try:
+            print("\nTAMBAH JADWAL PEMUPUKAN")
+            print("=" * 40)
+
+            self.cur.execute("SELECT id_tanaman, nama_tanaman FROM Tanaman ORDER BY id_tanaman")
+            tanaman_list = self.cur.fetchall()
+            if not tanaman_list:
+                print("Tidak ada data tanaman")
+                return
+
+            print("\nDAFTAR TANAMAN:")
+            for t in tanaman_list:
+                print(f"ID: {t['id_tanaman']} | Nama: {t['nama_tanaman']}")
+
+            while True:
+                try:
+                    id_tanaman = int(input("\nPilih ID Tanaman: "))
+                    tanaman_dipilih = next((t for t in tanaman_list if t['id_tanaman'] == id_tanaman), None)
+                    if tanaman_dipilih:
+                        break
+                    else:
+                        print("ID tanaman tidak valid!")
+                except ValueError:
+                    print("Masukkan angka yang valid!")
+
+            while True:
+                jenis = input("Jenis (Pupuk/Pestisida): ").strip().capitalize()
+                if jenis in ["Pupuk", "Pestisida"]:
+                    break
+                print("Jenis harus 'Pupuk' atau 'Pestisida'! Coba lagi.")
+
+            nama_kegiatan = input("Nama Kegiatan (misal: Pupuk awal, Pestisida): ").strip()
+            nama_pupuk = input("Nama Pupuk/Pestisida (misal: Pupuk Organik, Pestisida): ").strip()
+            while True:
+                try:
+                    interval_hari = int(input("Waktu Pemupukan (interval hari, misal: 5): "))
+                    if interval_hari > 0:
+                        break
+                    else:
+                        print("Interval hari harus lebih dari 0!")
+                except ValueError:
+                    print("Masukkan angka yang valid!")
+
+            while True:
+                try:
+                    dosis_per_bibit = float(input("Dosis per Bibit (ml atau gr per tanaman): "))
+                    if dosis_per_bibit > 0:
+                        break
+                    else:
+                        print("Dosis harus lebih dari 0!")
+                except ValueError:
+                    print("Masukkan angka yang valid!")
+
+            self.cur.execute("SELECT COALESCE(MAX(id_kegiatan), 300) + 1 FROM Jadwal_Pemupukan")
+            id_kegiatan = self.cur.fetchone()[0]
+
+            # Hitung tanggal pemupukan berdasarkan interval hari dari tanggal sekarang
+            tanggal_pemupukan = datetime.now().date() + timedelta(days=interval_hari)
+            self.cur.execute(
+                "INSERT INTO Jadwal_Pemupukan (id_kegiatan, nama_kegiatan, tanggal_pemupukan, dosis_per_bibit_tanaman, id_tanaman) VALUES (%s, %s, %s, %s, %s)",
+                (id_kegiatan, nama_kegiatan, tanggal_pemupukan, dosis_per_bibit, id_tanaman)
+            )
+            self.cur.execute(
+                "INSERT INTO Pupuk_Pestisida (id_pupukpestisida, nama_barang, jenis, id_kegiatan) VALUES ((SELECT COALESCE(MAX(id_pupukpestisida), 200) + 1 FROM Pupuk_Pestisida), %s, %s, %s)",
+                (nama_pupuk, jenis, id_kegiatan)
+            )
+            print(f"\nJadwal pemupukan berhasil ditambahkan! ID Kegiatan: {id_kegiatan}")
+        except psycopg2.Error as e:
+            print(f"Error menambah jadwal pemupukan: {e}")
+
+    def ubah_JadwalPemupukan(self):
+        print("3: Ubah Jadwal Pemupukan")
+        try:
+            print("\nUBAH JADWAL PEMUPUKAN")
+            print("=" * 30)
+            self.lihat_JadwalPemupukan()
+
+            while True:
+                try:
+                    id_kegiatan = int(input("\nMasukkan ID Kegiatan yang akan diubah: "))
+                    self.cur.execute("SELECT * FROM Jadwal_Pemupukan WHERE id_kegiatan = %s", (id_kegiatan,))
+                    jadwal = self.cur.fetchone()
+                    if jadwal:
+                        break
+                    else:
+                        print("ID kegiatan tidak ditemukan!")
+                except ValueError:
+                    print("Masukkan angka yang valid!")
+
+            print("\nPilih yang ingin diubah:")
+            print("1. Tanggal Pemupukan")
+            print("2. Dosis per Bibit")
+            pilihan = input("Pilihan (1-2): ")
+
+            if pilihan == "1":
+                while True:
+                    try:
+                        tanggal_baru = input("Tanggal baru (YYYY-MM-DD): ")
+                        tanggal_obj = datetime.strptime(tanggal_baru, "%Y-%m-%d").date()
+                        break
+                    except ValueError:
+                        print("Format tanggal salah! Gunakan YYYY-MM-DD")
+                self.cur.execute("UPDATE Jadwal_Pemupukan SET tanggal_pemupukan = %s WHERE id_kegiatan = %s", (tanggal_obj, id_kegiatan))
+                print("Tanggal pemupukan berhasil diubah!")
+
+            elif pilihan == "2":
+                while True:
+                    try:
+                        dosis_baru = float(input("Dosis per Bibit baru (ml atau gr per tanaman): "))
+                        if dosis_baru > 0:
+                            break
+                        else:
+                            print("Dosis per bibit harus lebih dari 0!")
+                    except ValueError:
+                        print("Masukkan angka yang valid!")
+                self.cur.execute("UPDATE Jadwal_Pemupukan SET dosis_per_bibit_tanaman = %s WHERE id_kegiatan = %s", (dosis_baru, id_kegiatan))
+                print("Dosis per bibit berhasil diubah!")
+        except psycopg2.Error as e:
+            print(f"Error mengubah jadwal pemupukan: {e}")
+
+    def hapus_JadwalPemupukan(self):
+        print("4: Hapus Jadwal Pemupukan")
+        try:
+            print("\nHAPUS JADWAL PEMUPUKAN")
+            print("=" * 30)
+            self.cur.execute("""
+                SELECT jp.id_kegiatan, t.id_tanaman || ' / ' || t.nama_tanaman AS tanaman, jp.nama_kegiatan, pp.jenis, jp.dosis_per_bibit_tanaman, jp.tanggal_pemupukan
+                FROM Jadwal_Pemupukan jp
+                JOIN Tanaman t ON jp.id_tanaman = t.id_tanaman
+                JOIN Pupuk_Pestisida pp ON jp.id_kegiatan = pp.id_kegiatan
+                ORDER BY jp.id_kegiatan;
+            """)
+            results = self.cur.fetchall()
+            if results:
+                print("\nJADWAL PEMUPUKAN")
+                print("=" * 80)
+                columns = ["ID Kegiatan", "ID/Nama Tanaman", "Nama Kegiatan", "Jenis", "Dosis per Bibit", "Tanggal Pemupukan"]
+                print(tabulate([list(row) for row in results], headers=columns, tablefmt="grid"))
+            else:
+                print("Tidak ada jadwal pemupukan yang ditemukan")
+
+            while True:
+                try:
+                    id_kegiatan = int(input("\nMasukkan ID Kegiatan yang akan dihapus: "))
+                    self.cur.execute("SELECT * FROM Jadwal_Pemupukan WHERE id_kegiatan = %s", (id_kegiatan,))
+                    jadwal = self.cur.fetchone()
+                    if jadwal:
+                        break
+                    else:
+                        print("ID kegiatan tidak ditemukan!")
+                except ValueError:
+                    print("Masukkan angka yang valid!")
+
+            konfirmasi = input(f"Yakin ingin menghapus jadwal ID {id_kegiatan}? (ya/tidak): ")
+            if konfirmasi.lower() == 'ya':
+                self.cur.execute("DELETE FROM Pupuk_Pestisida WHERE id_kegiatan = %s", (id_kegiatan,))
+                self.cur.execute("DELETE FROM Jadwal_Pemupukan WHERE id_kegiatan = %s", (id_kegiatan,))
+                print(f"Jadwal pemupukan ID {id_kegiatan} berhasil dihapus!")
+            else:
+                print("Penghapusan dibatalkan")
+        except psycopg2.Error as e:
+            print(f"Error menghapus jadwal pemupukan: {e}")
+
+    def lihatStok_pp(self):
+        print("5: Lihat Stok Pupuk/Pestisida")
+        try:
+            self.cur.execute("SELECT * FROM Pupuk_Pestisida")
+            results = self.cur.fetchall()
+            if results:
+                print("\nSTOK PUPUK/PESTISIDA")
+                print("=" * 80)
+                columns = ["ID", "Nama Barang", "Jenis", "ID Kegiatan"]
+                print(tabulate([list(row) for row in results], headers=columns, tablefmt="grid"))
+            else:
+                print("Tidak ada stok pupuk/pestisida yang ditemukan")
+        except psycopg2.Error as e:
+            print(f"Error mengambil stok: {e}")
+
+    def tambah_stok(self):
+        print("6: Tambah Stok")
+        try:
+            print("\nTAMBAH STOK PUPUK/PESTISIDA")
+            print("=" * 40)
+            nama_barang = input("Nama Barang: ").strip()
+            while True:
+                jenis = input("Jenis (Pupuk/Pestisida): ").strip().capitalize()
+                if jenis in ["Pupuk", "Pestisida"]:
+                    break
+                print("Jenis harus 'Pupuk' atau 'Pestisida'! Coba lagi.")
+            self.cur.execute("SELECT id_kegiatan FROM Jadwal_Pemupukan")
+            kegiatan_list = self.cur.fetchall()
+            if not kegiatan_list:
+                print("Tidak ada jadwal pemupukan yang tersedia untuk stok!")
+                return
+            print("\nDAFTAR ID KEGIATAN TERSEDIA:")
+            for k in kegiatan_list:
+                print(f"ID Kegiatan: {k['id_kegiatan']}")
+            while True:
+                try:
+                    id_kegiatan = int(input("\nPilih ID Kegiatan untuk stok: "))
+                    if any(k['id_kegiatan'] == id_kegiatan for k in kegiatan_list):
+                        break
+                    else:
+                        print("ID kegiatan tidak valid!")
+                except ValueError:
+                    print("Masukkan angka yang valid!")
+            self.cur.execute(
+                "INSERT INTO Pupuk_Pestisida (id_pupukpestisida, nama_barang, jenis, id_kegiatan) VALUES ((SELECT COALESCE(MAX(id_pupukpestisida), 200) + 1 FROM Pupuk_Pestisida), %s, %s, %s)",
+                (nama_barang, jenis, id_kegiatan)
+            )
+            print(f"Stok {nama_barang} berhasil ditambahkan!")
+        except psycopg2.Error as e:
+            print(f"Error menambah stok: {e}")
+
+    def hapus_stok(self):
+        print("7: Hapus Stok")
+        try:
+            print("\nHAPUS STOK PUPUK/PESTISIDA")
+            print("=" * 30)
+            self.lihatStok_pp()
+
+            while True:
+                try:
+                    id_pupukpestisida = int(input("\nMasukkan ID Stok yang akan dihapus: "))
+                    self.cur.execute("SELECT * FROM Pupuk_Pestisida WHERE id_pupukpestisida = %s", (id_pupukpestisida,))
+                    stok = self.cur.fetchone()
+                    if stok:
+                        break
+                    else:
+                        print("ID stok tidak ditemukan!")
+                except ValueError:
+                    print("Masukkan angka yang valid!")
+
+            konfirmasi = input(f"Yakin ingin menghapus stok ID {id_pupukpestisida}? (ya/tidak): ")
+            if konfirmasi.lower() == 'ya':
+                self.cur.execute("DELETE FROM Pupuk_Pestisida WHERE id_pupukpestisida = %s", (id_pupukpestisida,))
+                print(f"Stok ID {id_pupukpestisida} berhasil dihapus!")
+            else:
+                print("Penghapusan dibatalkan")
+        except psycopg2.Error as e:
+            print(f"Error menghapus stok: {e}")
+
 def clear_screen():
     print("Bersihkan layar konsol")
     os.system('cls' if os.name == 'nt' else 'clear')
@@ -531,13 +809,23 @@ def tampilkan_menu():
     print("SIPATANI - SISTEM INFORMASI PERTANIAN")
     print("FITUR 1: MANAJEMEN JADWAL TANAM")
     print("="*50)
-    print("1. Lihat Semua Jadwal")
-    print("2. Tambah Jadwal Baru")
-    print("3. Edit Jadwal")
-    print("4. Hapus Jadwal")
-    print("5. Input Hasil Panen")
-    print("6. Refresh Tampilan")
+    print("1.1 Lihat Semua Jadwal")
+    print("1.2 Tambah Jadwal Baru")
+    print("1.3 Edit Jadwal")
+    print("1.4 Hapus Jadwal")
+    print("1.5 Input Hasil Panen")
+    print("1.6 Refresh Tampilan")
     print("0. Kembali ke Dashboard / Keluar")
+    print("="*50)
+    print("FITUR 2: MANAJEMEN JADWAL PEMUPUKAN DAN STOK")
+    print("="*50)
+    print("2.1 Lihat Jadwal Pemupukan")
+    print("2.2 Tambah Jadwal Pemupukan")
+    print("2.3 Ubah Jadwal Pemupukan")
+    print("2.4 Hapus Jadwal Pemupukan")
+    print("2.5 Lihat Stok Pupuk/Pestisida")
+    print("2.6 Tambah Stok")
+    print("2.7 Hapus Stok")
     print("="*50)
 
 def main():
@@ -547,6 +835,7 @@ def main():
     print("Memulai aplikasi...")
     
     # Inisialisasi database
+    conn, cur = connect()
     db = SipataniDatabase()
     if not db.connect():
         print("Gagal koneksi ke database. Program dihentikan.")
@@ -554,40 +843,42 @@ def main():
     
     # Inisialisasi manager jadwal tanam
     jadwal_manager = JadwalTanamManager(db)
+    manajemen_pemupukan = Jadwal_Pemupukan(conn, cur)
     
     try:
         while True:
             tampilkan_menu()
+            menu_pemupukan()
             
             try:
                 pilihan = input("\nPilih menu (0-6): ")
                 
-                if pilihan == "1":
+                if pilihan == "1.1":
                     clear_screen()
                     jadwal_manager.lihat_semua_jadwal()
                     input("\nTekan Enter untuk melanjutkan...")
                 
-                elif pilihan == "2":
+                elif pilihan == "1.2":
                     clear_screen()
                     jadwal_manager.tambah_jadwal_baru()
                     input("\nTekan Enter untuk melanjutkan...")
                 
-                elif pilihan == "3":
+                elif pilihan == "1.3":
                     clear_screen()
                     jadwal_manager.edit_jadwal()
                     input("\nTekan Enter untuk melanjutkan...")
                 
-                elif pilihan == "4":
+                elif pilihan == "1.4":
                     clear_screen()
                     jadwal_manager.hapus_jadwal()
                     input("\nTekan Enter untuk melanjutkan...")
                 
-                elif pilihan == "5":
+                elif pilihan == "1.5":
                     clear_screen()
                     jadwal_manager.input_hasil_panen()
                     input("\nTekan Enter untuk melanjutkan...")
                 
-                elif pilihan == "6":
+                elif pilihan == "1.6":
                     clear_screen()
                     print("Tampilan di-refresh!")
                 
@@ -596,9 +887,37 @@ def main():
                     print("Terima kasih telah menggunakan SIPATANI!")
                     print("Menutup koneksi database...")
                     break
-                
+
+                elif pilihan == "2.1":
+                clear_screen()
+                manajemen_pemupukan.lihat_JadwalPemupukan()
+    
+                elif pilihan == "2.2":
+                    clear_screen()
+                    manajemen_pemupukan.tambah_JadwalPemupukan()
+    
+                elif pilihan == "2.3":
+                    clear_screen()
+                    manajemen_pemupukan.ubah_JadwalPemupukan()
+    
+                elif pilihan == "2.4":
+                    clear_screen()
+                    manajemen_pemupukan.hapus_JadwalPemupukan()
+    
+                elif pilihan == "2.5":
+                    clear_screen()
+                    manajemen_pemupukan.lihatStok_pp()
+    
+                elif pilihan == "2.6":
+                    clear_screen()
+                    manajemen_pemupukan.tambah_stok()
+    
+                elif pilihan == "2.7":
+                    clear_screen()
+                    manajemen_pemupukan.hapus_stok()
+    
                 else:
-                    print("Pilihan tidak valid! Silakan pilih 0-6.")
+                    print("Pilihan tidak valid! Silakan pilih dengan benar!")
                     input("\nTekan Enter untuk melanjutkan...")
                     
             except KeyboardInterrupt:
