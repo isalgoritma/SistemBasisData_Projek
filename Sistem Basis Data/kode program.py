@@ -942,3 +942,139 @@ if __name__ == "__main__":
         exit(1)
     
     main()
+class LaporanMasalahDB:
+    def __init__(self, dbname, user, password, host='localhost', port=5432):
+        self.connection_config = {
+            'dbname': dbname,
+            'user': user,
+            'password': password,
+            'host': host,
+            'port': port
+        }
+        self.conn = None
+
+    def connect(self):
+        try:
+            self.conn = psycopg2.connect(**self.connection_config)
+            print("Berhasil terhubung ke database PostgreSQL.")
+            self.create_table_if_not_exists()
+        except Exception as e:
+            print(f"Error koneksi ke database: {e}")
+            raise e
+
+    def close(self):
+        if self.conn:
+            self.conn.close()
+            print("Koneksi database ditutup.")
+
+    def create_table_if_not_exists(self):
+        create_table_query = """
+        CREATE TABLE IF NOT EXISTS laporan_masalah (
+            id SERIAL PRIMARY KEY,
+            id_jadwal_tanam INTEGER NOT NULL,
+            tanggal_masalah DATE NOT NULL,
+            jenis VARCHAR(50) NOT NULL,
+            deskripsi TEXT NOT NULL,
+            status_penanganan VARCHAR(20) NOT NULL CHECK (status_penanganan IN ('Belum', 'Proses', 'Selesai')),
+            solusi TEXT
+        );
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(create_table_query)
+            self.conn.commit()
+            print("Tabel 'laporan_masalah' siap digunakan.")
+
+    def lihat_laporan(self):
+        query = "SELECT * FROM laporan_masalah ORDER BY id;"
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(query)
+            records = cur.fetchall()
+            if not records:
+                print("Belum ada laporan masalah.")
+            else:
+                print("Daftar Laporan Masalah:")
+                for row in records:
+                    print(f"ID Laporan     : {row['id']}")
+                    print(f"ID Jadwal Tanam: {row['id_jadwal_tanam']}")
+                    print(f"Tanggal Masalah: {row['tanggal_masalah']}")
+                    print(f"Jenis Masalah  : {row['jenis']}")
+                    print(f"Deskripsi      : {row['deskripsi']}")
+                    print(f"Status         : {row['status_penanganan']}")
+                    print(f"Solusi         : {row['solusi'] if row['solusi'] else '-'}")
+                    print("-" * 40)
+
+    def tambah_laporan(self, id_jadwal_tanam, tanggal_masalah, jenis, deskripsi, status_penanganan, solusi):
+        insert_query = """
+        INSERT INTO laporan_masalah
+        (id_jadwal_tanam, tanggal_masalah, jenis, deskripsi, status_penanganan, solusi)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING id;
+        """
+        try:
+            tanggal_obj = datetime.strptime(tanggal_masalah, "%Y-%m-%d").date()
+        except ValueError:
+            print("Format tanggal salah. Gunakan format YYYY-MM-DD.")
+            return
+        if status_penanganan not in ('Belum', 'Proses', 'Selesai'):
+            print("Status penanganan harus salah satu dari: Belum, Proses, Selesai")
+            return
+        with self.conn.cursor() as cur:
+            cur.execute(insert_query, (id_jadwal_tanam, tanggal_obj, jenis, deskripsi, status_penanganan, solusi))
+            new_id = cur.fetchone()[0]
+            self.conn.commit()
+            print(f"Laporan baru berhasil ditambahkan dengan ID {new_id}.")
+
+    def edit_laporan(self, id_laporan, id_jadwal_tanam, tanggal_masalah, jenis, deskripsi, status_penanganan, solusi):
+        update_query = """
+        UPDATE laporan_masalah 
+        SET id_jadwal_tanam=%s, tanggal_masalah=%s, jenis=%s, deskripsi=%s, status_penanganan=%s, solusi=%s
+        WHERE id=%s;
+        """
+        try:
+            tanggal_obj = datetime.strptime(tanggal_masalah, "%Y-%m-%d").date()
+        except ValueError:
+            print("Format tanggal salah. Gunakan format YYYY-MM-DD.")
+            return
+        if status_penanganan not in ('Belum', 'Proses', 'Selesai'):
+            print("Status penanganan harus salah satu dari: Belum, Proses, Selesai")
+            return
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM laporan_masalah WHERE id=%s;", (id_laporan,))
+            if cur.fetchone() is None:
+                print(f"Laporan dengan ID {id_laporan} tidak ditemukan.")
+                return
+            cur.execute(update_query, (id_jadwal_tanam, tanggal_obj, jenis, deskripsi, status_penanganan, solusi, id_laporan))
+            self.conn.commit()
+            print(f"Laporan dengan ID {id_laporan} berhasil diedit.")
+
+    def hapus_laporan(self, id_laporan):
+        delete_query = "DELETE FROM laporan_masalah WHERE id=%s;"
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM laporan_masalah WHERE id=%s;", (id_laporan,))
+            if cur.fetchone() is None:
+                print(f"Laporan dengan ID {id_laporan} tidak ditemukan.")
+                return
+            cur.execute(delete_query, (id_laporan,))
+            self.conn.commit()
+            print(f"Laporan dengan ID {id_laporan} berhasil dihapus.")
+
+    def update_status_solusi(self, id_laporan, status_penanganan, solusi):
+        if status_penanganan not in ('Belum', 'Proses', 'Selesai'):
+            print("Status penanganan harus salah satu dari: Belum, Proses, Selesai")
+            return
+        update_query = """
+        UPDATE laporan_masalah 
+        SET status_penanganan=%s, solusi=%s
+        WHERE id=%s;
+        """
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM laporan_masalah WHERE id=%s;", (id_laporan,))
+            if cur.fetchone() is None:
+                print(f"Laporan dengan ID {id_laporan} tidak ditemukan.")
+                return
+            cur.execute(update_query, (status_penanganan, solusi, id_laporan))
+            self.conn.commit()
+            print(f"Status penanganan dan solusi laporan ID {id_laporan} berhasil diperbarui.")
+
+    def kembali_ke_dashboard(self):
+        print("Kembali ke Dashboard.")
